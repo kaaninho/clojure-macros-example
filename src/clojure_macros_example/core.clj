@@ -110,6 +110,8 @@
          "vom Typ 'Computer5', denn: " (Computer3? my-office-pc))
 
 (def-my-record3 Car color)
+(println "Expansion (mit Prädikat): " (macroexpand-1 '(def-my-record3 Car color)))
+
 (println "Ein Auto mit Farbe rot: " (->>Car "rot"))
 
 (println "Mein Office-PC ist nicht vom Typ 'Car', denn: " (Car? my-office-pc))
