@@ -115,6 +115,157 @@
 
 (println "\n====Blogpost 3====")
 
+(when-let [x (:name {:name "Kim" :age 42})]
+  (str "Hallo " x))
+
+(when-let [x (:last-name {:name "Kim" :age 42})]
+  (str "Hallo, Dein Nachname ist " x))
+
+(when-let [m {:person {:name "Kim" :age "42"}}]
+  (when-let [person (:person m)]
+    (when-let [name (:name person)]
+      (str "Die Person-Map " person " enthält den Namen " name))))
+
+
+(defmacro when-let*
+  [bindings & body]
+  (assert (vector? bindings) "bindings must be a vector")
+  (assert (= 0 (mod (count bindings) 2))
+          "when-let* requires an even number of forms in bindings")
+  (if (empty? bindings)
+    `(do
+       ~@body)
+    (let [sym (first bindings)
+          value (second bindings)]
+      `(when-let [~sym ~value]
+         (when-let* ~(vec (drop 2 bindings))
+           ~@body)))))
+
+(when-let* [m {:person {:name "Kim" :age "42"}}
+            person (:person m)
+            name (:name person)]
+  (str "Die Person-Map " person " enthält den Namen " name))
+
+
+
+
+
+;;; Das Record-Makro
+(println "\n----Das Record-Makro----\n")
+
+(defrecord Computer [cpu ram hard-drive])
+(def office-pc (->Computer "AMD Athlon XP 1700 MHz" 2 500))
+(def gaming-pc (->Computer "Intel I5 6600 3600 MHz" 16 1000))
+
+(println (str "Der Office-PC hat " (:ram office-pc) "GB RAM, einen "
+              (:cpu office-pc) " Prozessor und " (:hard-drive office-pc)
+              " GB Festplattenkapazität.\n"))
+
+
+;; Nicht automatisch generierter Computer-Konstruktor
+(defn ->>computer
+  [cpu ram hard-drive]
+  {:cpu cpu
+   :ram ram
+   :hard-drive hard-drive})
+
+;; Recordkonstruktor-Erzeugerfunktion
+(defn create-record-constructor
+  [type-name field-names]
+  `(defn ~(symbol (str "->>" type-name))
+     ~field-names
+     ~(into {}
+            (map (fn [field-name]
+                   [(keyword field-name) field-name])
+                 field-names))))
+
+;; Test
+(create-record-constructor 'computer ['cpu 'ram 'hard-drive])
+
+
+(defmacro def-my-record-1
+  [type-name field-names]
+  `(do
+     ~(create-record-constructor type-name field-names)))
+
+(println "Expansion def-my-record-1: "
+         (macroexpand-1 '(def-my-record-1 computer1 [cpu ram hard-drive])))
+
+
+;; Nicht automatisch generierter Computer-Selektor
+(defn computer-cpu
+  [computer]
+  (:cpu computer))
+
+
+;; Recordselektoren-Erzeugerfunktion
+(defn create-record-accessors
+  [type-name field-names]
+  (map (fn [field-name]
+         `(defn ~(symbol (str type-name "-" field-name))
+            [~type-name]
+            (~(keyword field-name) ~type-name)))
+       field-names))
+
+(defmacro def-my-record-2
+  [type-name field-names]
+  `(do
+     ~(create-record-constructor type-name field-names)
+     ~@(create-record-accessors type-name field-names)))
+
+(def-my-record-2 computer-2 [cpu ram hard-drive])
+(def office-pc-2 (->>computer-2 "Athlon XP" 2 500))
+
+(computer-2-hard-drive office-pc-2)
+
+
+
+;; Prädikat
+
+;; Neue Recordkonstruktor-Erzeugerfunktion
+(defn create-record-constructor-2
+  [type-name field-names]
+  `(defn ~(symbol (str "->>" type-name))
+     ~field-names
+     ~(vary-meta (into {}
+                       (map (fn [field-name]
+                              [(keyword field-name) field-name])
+                            field-names))
+                 (fn [m] (assoc m :__type__ `'~type-name)))))
+
+;; Prädikat-Erzeugerfunktion
+(defn create-predicate
+  [type-name]
+  `(defn ~(symbol (str type-name "?"))
+     [~'thing]
+     (= '~type-name (:__type__ (meta ~'thing)))))
+
+
+(defmacro def-my-record-3
+  [type-name field-names]
+  `(do
+     ~@(create-record-accessors type-name field-names)
+     ~(create-predicate type-name)
+     ~(create-record-constructor-2 type-name field-names)))
+
+(def-my-record-3 car [color])
+(def-my-record-3 computer [cpu ram hard-drive])
+(def fire-truck (->>car "red"))
+
+(car? fire-truck)
+(computer? fire-truck)
+
+
+
+
+
+
+
+
+
+;;; Snippets
+
+
 ;; Threading operator `my->>`
 
 (defmacro my->> [expr & args]
@@ -158,66 +309,3 @@
 
 
 
-
-
-
-;;; Das Record-Makro
-(println "\n----Das Record-Makro----\n")
-
-(defrecord Computer [cpu ram])
-(def office-pc (->Computer "AMD Athlon XP 1700 MHz" 2))
-(def gaming-pc (->Computer "Intel I5 6600 3600 MHz" 16))
-
-(println (str "Der Office-PC hat " (:ram office-pc) "GB RAM und einen "
-              (:cpu office-pc) " Prozessor.\n"))
-
-
-;; Konstruktor eines Computers
-(defn ->>Computer
-  [ram-value]
-  {:ram ram-value})
-(->>Computer 3)
-
-
-;; 1. Versuch mit Makro
-(defmacro def-my-record1
-  [type-name field]
-  (list 'defn type-name ['arg] {(keyword field) 'arg}))
-
-(println "Expansion def-my-record1: " (macroexpand-1 '(def-my-record1 Computer1 ram)))
-
-(def-my-record1 Computer1 ram)
-(Computer1 2)
-(:ram (Computer1 2))
-
-
-(defmacro def-my-record2
-  [type-name field]
-  (list 'defn (symbol (str "->>" type-name)) '[arg] {(keyword field) 'arg}))
-
-(def-my-record2 Computer2 ram)
-
-(->>Computer2 2)
-
-
-;; Version mit Praedikat
-(defmacro def-my-record3
-  [type-name field]
-  (list 'do
-        (list 'defn (symbol (str "->>" type-name)) '[arg] {(keyword field) 'arg
-                                                           :__type__ (str type-name)})
-        (list 'defn (symbol (str type-name "?")) '[el] (list '= (str type-name)
-                                                             '(:__type__ el)))))
-
-(def-my-record3 Computer3 ram)
-
-(def my-office-pc (->>Computer3 2))
-(println "Mein Office-PC hat" (:ram my-office-pc) "GB RAM und ist tatsaechlich"
-         "vom Typ 'Computer5', denn: " (Computer3? my-office-pc))
-
-(def-my-record3 Car color)
-(println "Expansion (mit Prädikat): " (macroexpand-1 '(def-my-record3 Car color)))
-
-(println "Ein Auto mit Farbe rot: " (->>Car "rot"))
-
-(println "Mein Office-PC ist nicht vom Typ 'Car', denn: " (Car? my-office-pc))
