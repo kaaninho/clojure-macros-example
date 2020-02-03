@@ -105,15 +105,167 @@
 ;; Vermeintliche Identitätsfunktion
 (println "15 = " (my-identity 15) "?")
 (println "15 = "
-         (let [x 12] (my-identity x)) "?")
+         (let [x 15] (my-identity x)) "?")
 
 
 
 
 
 ;;; Code zum dritten Blogpost
-
 (println "\n====Blogpost 3====")
+
+(defrecord Bill [id iban amount paid?])
+
+(def restaurant-bill (->Bill 1 "DEXY XYXY XYXY ..." 48.00 true))
+(def hospital-bill (->Bill 2 "DEYX YXYX YXYX ..." 10.00 false))
+
+(declare pay!)
+
+(defn bills-to-pay
+  [bills]
+  (remove :paid bills))
+
+(bills-to-pay [restaurant-bill hospital-bill])
+;; => (#Bill{:id 1, :iban "DEXY XYXY XYXY ...", :amount 48.0, :paid? true}
+;;     #Bill{:id 2, :iban "DEYX YXYX YXYX ...", :amount 10.0, :paid? false})
+
+
+
+
+
+(:paid restaurant-bill) ;; => `nil`
+
+(def rb-2 (assoc restaurant-bill :velocity 100))
+(instance? Bill rb-2)
+
+
+
+;;; Das Record-Makro
+(println "\n----Das Record-Makro----\n")
+
+;; Nicht automatisch generierter Bill-Record-Konstruktor
+(defn make-bill
+  [id iban amount paid?]
+  {:id id
+   :iban iban
+   :amount amount
+   :paid? paid?})
+
+;; Restaurant-Rechnung mit eigenem Konstruktor
+(make-bill 1 "DEXY XYXY XYXY ..." 48.00 true)
+
+
+;; Recordkonstruktor-Erzeugerfunktion
+(defn create-record-constructor
+  [type-name field-names]
+  `(defn ~(symbol (str "make-" type-name))
+     ~field-names
+     ~(into {}
+            (map (fn [field-name]
+                   [(keyword field-name) field-name])
+                 field-names))))
+
+;; Test
+(create-record-constructor 'bill ['id 'iban 'amount 'paid?])
+
+
+(defmacro def-record-type
+  [type-name field-names]
+  `(do
+     ~(create-record-constructor type-name field-names)))
+
+(println "Expansion def-record-type: "
+         (macroexpand-1 '(def-record-type bill [id iban amount paid?])))
+
+
+;; Nicht automatisch generierter Bill-Selektor
+(defn bill-amount
+  [bill]
+  (:amount bill))
+
+
+;; Recordselektoren-Erzeugerfunktion
+(defn create-record-accessors
+  [type-name field-names]
+  (map (fn [field-name]
+         `(defn ~(symbol (str type-name "-" field-name))
+            [~type-name]
+            (~(keyword field-name) ~type-name)))
+       field-names))
+
+(defmacro def-record-type
+  [type-name field-names]
+  `(do
+     ~(create-record-constructor type-name field-names)
+     ~@(create-record-accessors type-name field-names)))
+
+(def-record-type bill [id iban amount paid?])
+(def the-bill (make-bill 1 "DEXY XYXY XYXY ..." 48.00 true))
+
+(bill-paid? the-bill)
+
+
+
+;;; Prädikat
+
+;; Neue Recordkonstruktor-Erzeugerfunktion
+(defn create-record-constructor
+  [type-name field-names]
+  `(defn ~(symbol (str "make-" type-name))
+     ~field-names
+     ~(vary-meta (into {}
+                       (map (fn [field-name]
+                              [(keyword field-name) field-name])
+                            field-names))
+                 (fn [m] (assoc m :__type__ `'~type-name)))))
+
+;; Prädikat-Erzeugerfunktion
+(defn create-predicate
+  [type-name field-names]
+  `(defn ~(symbol (str type-name "?"))
+     [~'thing]
+     (and
+      (= '~type-name (:__type__ (meta ~'thing)))
+      (map? ~'thing)
+      (= ~(set (map keyword field-names))
+         (set (keys ~'thing))))))
+
+
+(defmacro def-record-type
+  [type-name field-names]
+  `(do
+     ~@(create-record-accessors type-name field-names)
+     ~(create-predicate type-name field-names)
+     ~(create-record-constructor type-name field-names)))
+
+(def-record-type car [color])
+(def-record-type bill [id iban amount paid?])
+(def fire-truck (make-car "red"))
+(def the-bill (make-bill 1 "DEXY XYXY XYXY ..." 48.00 true))
+
+(car-color fire-truck)                ; => "red"
+(car? fire-truck)                     ; => true
+(bill? fire-truck)                    ; => false
+(car? (assoc fire-truck :amount 23))  ; => false
+;; (bill-paid the-bill)               ; =>    Unable to resolve symbol: bill-paid in this context
+
+
+
+
+
+(let [field-names ['hello 'you]]
+  (defn bill?
+    [thing]
+    (and
+     (map? thing)
+     (= 'bill (:__type__ (meta thing)))
+     (= (set (map keyword field-names))
+        (set (keys thing))))))
+
+(bill? (vary-meta {} (fn [old ] (assoc old :__type__ 'bill))))
+
+;;; Snippets
+
 
 (when-let [x (:name {:name "Kim" :age 42})]
   (str "Hallo " x))
@@ -148,122 +300,6 @@
 
 
 
-
-
-;;; Das Record-Makro
-(println "\n----Das Record-Makro----\n")
-
-(defrecord Computer [cpu ram hard-drive])
-(def office-pc (->Computer "AMD Athlon XP 1700 MHz" 2 500))
-(def gaming-pc (->Computer "Intel I5 6600 3600 MHz" 16 1000))
-
-(println (str "Der Office-PC hat " (:ram office-pc) "GB RAM, einen "
-              (:cpu office-pc) " Prozessor und " (:hard-drive office-pc)
-              " GB Festplattenkapazität.\n"))
-
-
-;; Nicht automatisch generierter Computer-Konstruktor
-(defn ->>computer
-  [cpu ram hard-drive]
-  {:cpu cpu
-   :ram ram
-   :hard-drive hard-drive})
-
-;; Recordkonstruktor-Erzeugerfunktion
-(defn create-record-constructor
-  [type-name field-names]
-  `(defn ~(symbol (str "->>" type-name))
-     ~field-names
-     ~(into {}
-            (map (fn [field-name]
-                   [(keyword field-name) field-name])
-                 field-names))))
-
-;; Test
-(create-record-constructor 'computer ['cpu 'ram 'hard-drive])
-
-
-(defmacro def-my-record-1
-  [type-name field-names]
-  `(do
-     ~(create-record-constructor type-name field-names)))
-
-(println "Expansion def-my-record-1: "
-         (macroexpand-1 '(def-my-record-1 computer1 [cpu ram hard-drive])))
-
-
-;; Nicht automatisch generierter Computer-Selektor
-(defn computer-cpu
-  [computer]
-  (:cpu computer))
-
-
-;; Recordselektoren-Erzeugerfunktion
-(defn create-record-accessors
-  [type-name field-names]
-  (map (fn [field-name]
-         `(defn ~(symbol (str type-name "-" field-name))
-            [~type-name]
-            (~(keyword field-name) ~type-name)))
-       field-names))
-
-(defmacro def-my-record-2
-  [type-name field-names]
-  `(do
-     ~(create-record-constructor type-name field-names)
-     ~@(create-record-accessors type-name field-names)))
-
-(def-my-record-2 computer-2 [cpu ram hard-drive])
-(def office-pc-2 (->>computer-2 "Athlon XP" 2 500))
-
-(computer-2-hard-drive office-pc-2)
-
-
-
-;; Prädikat
-
-;; Neue Recordkonstruktor-Erzeugerfunktion
-(defn create-record-constructor-2
-  [type-name field-names]
-  `(defn ~(symbol (str "->>" type-name))
-     ~field-names
-     ~(vary-meta (into {}
-                       (map (fn [field-name]
-                              [(keyword field-name) field-name])
-                            field-names))
-                 (fn [m] (assoc m :__type__ `'~type-name)))))
-
-;; Prädikat-Erzeugerfunktion
-(defn create-predicate
-  [type-name]
-  `(defn ~(symbol (str type-name "?"))
-     [~'thing]
-     (= '~type-name (:__type__ (meta ~'thing)))))
-
-
-(defmacro def-my-record-3
-  [type-name field-names]
-  `(do
-     ~@(create-record-accessors type-name field-names)
-     ~(create-predicate type-name)
-     ~(create-record-constructor-2 type-name field-names)))
-
-(def-my-record-3 car [color])
-(def-my-record-3 computer [cpu ram hard-drive])
-(def fire-truck (->>car "red"))
-
-(car? fire-truck)
-(computer? fire-truck)
-
-
-
-
-
-
-
-
-
-;;; Snippets
 
 
 ;; Threading operator `my->>`
